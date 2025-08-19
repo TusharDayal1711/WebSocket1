@@ -1,0 +1,48 @@
+	ws, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Println("upgrade error:", err)
+		return
+	}
+
+	clientId := uuid.New().String()
+
+	client := &Client{ID: clientId, Conn: ws}
+	clients[clientId] = client
+
+	log.Println("new client connected with id:", clientId)
+
+	_ = ws.WriteJSON(map[string]string{
+		"connection_id": clientId,
+	})
+
+	//remove client and disconnect
+	defer func() {
+		delete(clients, clientId)
+		ws.Close()
+		log.Println("client disconnected:", clientId)
+	}()
+	for {
+		_, recivedMsg, err := ws.ReadMessage()
+		if err != nil {
+			log.Println("Read error:", err)
+			break
+		}
+
+		var msg Message
+		if err := json.Unmarshal(recivedMsg, &msg); err != nil {
+			log.Println("Invalid JSON received:", string(recivedMsg))
+			continue
+		}
+
+		msg.From = clientId
+		if target, ok := clients[msg.To]; ok {
+			err = target.Conn.WriteJSON(msg)
+			if err != nil {
+				log.Println("writing error:", err)
+			}
+		} else {
+			_ = ws.WriteJSON(map[string]string{
+				"error": "receiver client not found",
+			})
+		}
+	}
